@@ -1,0 +1,18 @@
+{
+  "tailcut": {
+    "picture_thresh":6,
+    "boundary_thresh":3,
+    "keep_isolated_pixels":false,
+    "min_number_picture_neighbors":1
+  },
+
+  "LocalPeakWindowSum":{
+     "window_shift":4,
+     "window_width":8
+    },
+
+  "gain_selector":"ThresholdGainSelector",
+  "gain_selector_config": {
+    "threshold":3500
+  }
+}
