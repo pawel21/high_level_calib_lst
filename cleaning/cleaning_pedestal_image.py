@@ -173,6 +173,7 @@ class CleanigPedestalImage(Component):
 
         disp0 = CameraDisplay(geom, ax=ax)
         disp0.image = signal_place_after_clean/sum_ped_ev
+        disp0.highlight_pixels(noise_pixels_id_list, linewidth=3)
         disp0.add_colorbar(ax=ax, label="N times signal remain after cleaning [%]")
         disp0.cmap = 'gnuplot2'
         ax.set_title("{} \n {}/{}".format(input_file.split("/")[-1][8:21], alive_ped_ev, sum_ped_ev), fontsize=25)
@@ -199,7 +200,7 @@ def tailcuts_pedestal_clean(
 
     pixels_above_picture = np.logical_and(image>= picture_thresh, image >= ped_threshold)
     pixels_above_picture[dead_pixel_ids_list] = False
-    
+
     if keep_isolated_pixels or min_number_picture_neighbors == 0:
         pixels_in_picture = pixels_above_picture
     else:
@@ -256,6 +257,28 @@ def make_camera_image(image):
 def get_threshold(ped_mean_pe, ped_rms_pe, sigma_clean):
     threshold_clean_pe = ped_mean_pe + sigma_clean*ped_rms_pe
     return threshold_clean_pe
+
+def make_camera_binary_image(image, sigma, clean_bound, death_pixel_ids_list):
+    fig, ax = plt.subplots(1,2, figsize=(14, 7))
+
+    geom = CameraGeometry.from_name('LSTCam-003')
+    disp0 = CameraDisplay(geom, ax=ax[0])
+    disp0.image = image
+    disp0.cmap = plt.cm.gnuplot2
+    disp0.add_colorbar(ax=ax[0])
+    ax[0].set_title("Cleaning threshold from interleaved pedestal. \n sigma = {}".format(sigma), fontsize=15)
+
+    disp1 = CameraDisplay(geom, ax=ax[1])
+    disp1.image = image
+    cmap = matplotlib.colors.ListedColormap(['black', 'red'])
+    bounds=[0, clean_bound, 2*clean_bound]
+    norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
+    disp1.cmap = cmap
+    disp1.add_colorbar(norm=norm, boundaries=bounds, ticks=[0, clean_bound, 2*clean_bound])
+    disp1.set_limits_minmax(0, 2*clean_bound)
+    disp1.highlight_pixels(death_pixel_ids_list, linewidth=3)
+    ax[1].set_title("Red pixels - above cleaning tailcut threshold", fontsize=15)
+    plt.tight_layout()
 
 
 def check_interleave_pedestal_cleaning():
