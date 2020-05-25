@@ -2,6 +2,7 @@ import h5py
 import tables
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 from numba import jit, njit, prange
 
 from ctapipe.core import Component
@@ -185,13 +186,97 @@ class CleanigPedestalImage(Component):
         plt.tight_layout()
         plt.show()
 
+    def plot_camera_display(self, image, input_file, noise_pixels_id_list, alive_ped_ev, sum_ped_ev):
+        fig, ax = plt.subplots(figsize=(10, 8))
+        geom = CameraGeometry.from_name('LSTCam-003')
+
+        disp0 = CameraDisplay(geom, ax=ax)
+        disp0.image = image
+        disp0.highlight_pixels(noise_pixels_id_list, linewidth=3)
+        disp0.add_colorbar(ax=ax, label="N times signal remain after cleaning [%]")
+        disp0.cmap = 'gnuplot2'
+        ax.set_title("{} \n {}/{}".format(input_file.split("/")[-1][8:21], alive_ped_ev, sum_ped_ev), fontsize=25)
+
+        print("{}/{}".format(alive_ped_ev, sum_ped_ev))
+
+        ax.set_xlabel(" ")
+        ax.set_ylabel(" ")
+        plt.tight_layout()
+        plt.show()
+
+    def check_interleave_pedestal_cleaning(self,
+                                           list_of_file,
+                                           max_events,
+                                           sigma,
+                                           dl1_file):
+
+        high_gain = 0
+        ped_mean_pe, ped_rms_pe = get_bias_and_rms(dl1_file)
+        bad_pixel_ids = np.where(ped_rms_pe[1, high_gain, :] == 0)[0]
+        print(bad_pixel_ids)
+        th = get_threshold(ped_mean_pe[1, high_gain, :],
+                           ped_rms_pe[1, high_gain, :],
+                           sigma)
+
+        make_camera_binary_image(th,
+                                 sigma,
+                                 self.cleaning_parameters['picture_thresh'],
+                                 bad_pixel_ids)
+
+        signal_place_after_clean = np.zeros(1855)
+        sum_ped_ev = 0
+        alive_ped_ev = 0
+
+        for input_file in list_of_file:
+            print(input_file)
+
+            r0_r1_calibrator = LSTR0Corrections(pedestal_path=None,
+                                                r1_sample_start=3,
+                                                r1_sample_end=39)
+
+            reader = LSTEventSource(input_url=input_file,
+                                    max_events=max_events)
+
+            for i, ev in enumerate(reader):
+                r0_r1_calibrator.calibrate(ev)
+                if i%10000 == 0:
+                    print(ev.r0.event_id)
+
+                if ev.lst.tel[1].evt.tib_masked_trigger == 32:
+                    sum_ped_ev += 1
+                    self.r1_dl1_calibrator(ev)
+
+                    img = ev.dl1.tel[1].image
+                    img[bad_pixel_ids] = 0
+                    geom = ev.inst.subarray.tel[1].camera
+                    clean = tailcuts_pedestal_clean(
+                                        geom,
+                                        img,
+                                        th,
+                                        **self.cleaning_parameters
+                                        )
+
+                    cleaned = img.copy()
+                    cleaned[~clean] = 0.0
+
+                    signal_place_after_clean[np.where(clean == True)] += 1
+                    if np.sum(cleaned>0) > 0:
+                        alive_ped_ev += 1
+
+        noise_remain = signal_place_after_clean/sum_ped_ev
+
+        self.plot_camera_display(noise_remain,
+                                 input_file,
+                                 bad_pixel_ids,
+                                 alive_ped_ev,
+                                 sum_ped_ev)
+
 
 
 def tailcuts_pedestal_clean(
     geom,
     image,
     ped_threshold,
-    dead_pixel_ids_list,
     picture_thresh=7,
     boundary_thresh=5,
     keep_isolated_pixels=False,
@@ -199,7 +284,6 @@ def tailcuts_pedestal_clean(
 ):
 
     pixels_above_picture = np.logical_and(image>= picture_thresh, image >= ped_threshold)
-    pixels_above_picture[dead_pixel_ids_list] = False
 
     if keep_isolated_pixels or min_number_picture_neighbors == 0:
         pixels_in_picture = pixels_above_picture
@@ -279,6 +363,7 @@ def make_camera_binary_image(image, sigma, clean_bound, death_pixel_ids_list):
     disp1.highlight_pixels(death_pixel_ids_list, linewidth=3)
     ax[1].set_title("Red pixels - above cleaning tailcut threshold", fontsize=15)
     plt.tight_layout()
+    plt.show()
 
 
 def check_interleave_pedestal_cleaning():
